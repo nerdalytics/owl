@@ -13,7 +13,7 @@ Owl is a single fish-shell function that wraps the `claude` CLI. It has two subc
 
 `check` reads that report and asks `claude` to reproduce each finding with a test. Only a passing test marks the finding `CONFIRMED`. Three attempts, then `NOT CONFIRMED` and move on. No severity scores.
 
-Runs are resumable. Progress is written to a markdown file as owl goes, so an interrupted scan picks up where it left off. If Claude hits a rate limit, owl parses the reset time and waits.
+Runs are resumable. Owl writes progress to a markdown file as it runs, so an interrupted scan picks up where it left off. If Claude hits a rate limit, Owl parses the reset time and waits.
 
 ## Install
 
