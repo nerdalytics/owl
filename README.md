@@ -1,4 +1,4 @@
-# owl
+# Owl
 
 Owl audits local files for a named issue type, then verifies every finding by reproducing it with a test.
 
