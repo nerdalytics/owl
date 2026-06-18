@@ -124,13 +124,22 @@ function __owl_check_tools --argument-names cmd
     return 0
 end
 
-function __owl_resolve_claude --argument-names claude_override
-    if test -n "$claude_override"
-        if test -x "$claude_override"
-            echo $claude_override
+function __owl_resolve_agent --argument-names agent_override
+    if test -n "$agent_override"
+        # A path (contains /) must be executable as given; a bare name resolves on $PATH.
+        if string match -q '*/*' -- $agent_override
+            if test -x "$agent_override"
+                echo $agent_override
+                return 0
+            end
+            echo "owl: agent binary not found at '$agent_override'" >&2
+            return 1
+        end
+        if command -sq $agent_override
+            command -s $agent_override
             return 0
         end
-        echo "owl: claude binary not found at '$claude_override'" >&2
+        echo "owl: agent binary '$agent_override' not found on \$PATH" >&2
         return 1
     end
 
@@ -141,7 +150,7 @@ function __owl_resolve_claude --argument-names claude_override
         end
     end
 
-    echo "owl: claude binary not found — install claude or pass --claude <path>" >&2
+    echo "owl: no agent binary found — install claude or pass --agent <name|path>" >&2
     return 1
 end
 
@@ -639,11 +648,11 @@ function __owl_print_params
     echo "------------------" >&2
 end
 
-# Shared loop: runs claude on each file with state tracking and rate limit handling.
-# Usage: __owl_run_claude CLAUDE_BIN USE_MEMORY LABEL PROMPT_TEMPLATE STATE_FILE RETRY_DELAY [EXTRA_ARGS...] -- FILE...
+# Shared loop: runs the agent on each file with state tracking and rate limit handling.
+# Usage: __owl_run_agent AGENT_BIN USE_MEMORY LABEL PROMPT_TEMPLATE STATE_FILE RETRY_DELAY [EXTRA_ARGS...] -- FILE...
 # {} in PROMPT_TEMPLATE is replaced with the current file path.
-function __owl_run_claude
-    set -l claude_bin $argv[1]
+function __owl_run_agent
+    set -l agent_bin $argv[1]
     set -l use_memory $argv[2]
     set -l label $argv[3]
     set -l prompt_tpl $argv[4]
@@ -670,25 +679,25 @@ function __owl_run_claude
     end
 
     # Guard against concurrent owl instances in the same shell
-    if set -qg __owl_claude_pid_$fish_pid
+    if set -qg __owl_agent_pid_$fish_pid
         echo "owl: another instance is already running in this shell — use a separate terminal" >&2
         return 1
     end
 
-    # Track claude PID for interrupt handler ($fish_pid-scoped)
-    set -l _cpid __owl_claude_pid_$fish_pid
+    # Track agent PID for interrupt handler ($fish_pid-scoped)
+    set -l _apid __owl_agent_pid_$fish_pid
     set -l _int __owl_interrupted_$fish_pid
-    set -g $_cpid 0
+    set -g $_apid 0
     set -g $_int no
 
     # Scoped SIGINT handler
     function __owl_sigint_handler_$fish_pid --on-signal SIGINT
-        set -l _cpid __owl_claude_pid_$fish_pid
+        set -l _apid __owl_agent_pid_$fish_pid
         set -l _int __owl_interrupted_$fish_pid
         set -g $_int yes
-        if test "$$_cpid" -ne 0
-            kill -TERM $$_cpid 2>/dev/null
-            wait $$_cpid 2>/dev/null
+        if test "$$_apid" -ne 0
+            kill -TERM $$_apid 2>/dev/null
+            wait $$_apid 2>/dev/null
         end
     end
 
@@ -701,7 +710,7 @@ function __owl_run_claude
             echo "Interrupted — progress saved to $state_file" >&2
             echo "Resume with: owl $label --resume --state-file $state_file" >&2
             functions -e __owl_sigint_handler_$fish_pid
-            set -e $_cpid $_int
+            set -e $_apid $_int
             return 130
         end
 
@@ -738,12 +747,12 @@ function __owl_run_claude
         set prompt (string replace --all -- $s_chk '`'(__owl_chk_path $file)'`' "$prompt" | string join \n)
 
         set -l allowed_tools Read Write Edit Glob Grep Bash
-        set -l claude_args --allowed-tools $allowed_tools
+        set -l agent_args --allowed-tools $allowed_tools
         if test "$use_memory" = false
-            set -a claude_args --disable-slash-commands
+            set -a agent_args --disable-slash-commands
         end
-        set -a claude_args $extra_args
-        set -a claude_args -p $prompt
+        set -a agent_args $extra_args
+        set -a agent_args -p $prompt
 
         # Retry loop for rate limits on this file
         while true
@@ -753,16 +762,16 @@ function __owl_run_claude
 
             set -l tmp_out (mktemp)
 
-            set -l run_cmd $claude_bin $claude_args
+            set -l run_cmd $agent_bin $agent_args
             if test "$use_memory" = false
                 set run_cmd env -i HOME=$HOME PATH=(string join : $PATH) TMPDIR=$TMPDIR USER=$USER \
                     SECURITYSESSIONID=$SECURITYSESSIONID CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 $run_cmd
             end
             $run_cmd > $tmp_out 2>&1 &
-            set -g $_cpid $last_pid
+            set -g $_apid $last_pid
 
-            wait $$_cpid 2>/dev/null
-            set -g $_cpid 0
+            wait $$_apid 2>/dev/null
+            set -g $_apid 0
 
             # Read once, then discard
             set -l output (cat $tmp_out)
@@ -771,7 +780,7 @@ function __owl_run_claude
             # Show captured output
             printf '%s\n' $output >&2
 
-            # Check for interrupt during claude execution
+            # Check for interrupt during agent execution
             if test "$$_int" = yes
                 break
             end
@@ -818,7 +827,7 @@ function __owl_run_claude
     # Clean up handler and globals
     functions -e __owl_sigint_handler_$fish_pid
     set -l was_interrupted $$_int
-    set -e $_cpid $_int
+    set -e $_apid $_int
 
     # Check final state
     if test "$was_interrupted" = yes
@@ -837,7 +846,7 @@ function __owl_scan
     set -l slug $argv[2]
     set -e argv[1..2]
 
-    argparse -n 'owl scan' 'h/help' 'd/depth=!_validate_int' 'c/claude=' 'i/ignore=!__owl_validate_ignore' 'include=+!__owl_validate_extension' 'exclude=+!__owl_validate_extension' 'effort=!__owl_validate_effort' 'permission-mode=!__owl_validate_permission_mode' 'no-memory' 'memory' 'state-file=!__owl_validate_state_file' 'resume' 'retry-delay=!_validate_int' -- $argv
+    argparse -n 'owl scan' 'h/help' 'd/depth=!_validate_int' 'a/agent=' 'i/ignore=!__owl_validate_ignore' 'include=+!__owl_validate_extension' 'exclude=+!__owl_validate_extension' 'effort=!__owl_validate_effort' 'permission-mode=!__owl_validate_permission_mode' 'no-memory' 'memory' 'state-file=!__owl_validate_state_file' 'resume' 'retry-delay=!_validate_int' -- $argv
     or return 1
 
     if set -ql _flag_help
@@ -845,14 +854,14 @@ function __owl_scan
         echo "" >&2
         echo "Options:" >&2
         echo "  -d, --depth N          Max directory depth (default: 10)" >&2
-        echo "  -c, --claude PATH      Path to claude binary" >&2
+        echo "  -a, --agent NAME|PATH  Agent binary name or path (default: claude)" >&2
         echo "  -i, --ignore BOOL      Respect ignore files (default: true)" >&2
         echo "      --include EXT      Include files by extension (repeatable)" >&2
         echo "      --exclude SUFFIX   Exclude files by suffix (repeatable)" >&2
         echo "      --effort VALUE     Claude effort level (default: max)" >&2
         echo "      --permission-mode  Permission mode: acceptEdits, plan, default, auto, dontAsk (default: acceptEdits)" >&2
         echo "      --no-memory        Disable auto-memory and skills (default)" >&2
-        echo "      --memory           Allow claude to use memory and skills" >&2
+        echo "      --memory           Allow the agent to use memory and skills" >&2
         echo "      --state-file PATH  Progress file path (default: .owl-scn-\$slug.md)" >&2
         echo "      --resume           Resume from progress file" >&2
         echo "      --retry-delay N    Extra seconds after rate limit reset (default: 1)" >&2
@@ -1023,7 +1032,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         set -l excludes $stored_excludes
         set -ql _flag_exclude; and set excludes $_flag_exclude
 
-        # Read files from state — check before resolving claude
+        # Read files from state — check before resolving the agent
         set -l files
         set -l all_done yes
         for entry in (__owl_state_read_files $state_file)
@@ -1039,7 +1048,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
             return 0
         end
 
-        set -l claude_bin (__owl_resolve_claude "$_flag_claude")
+        set -l agent_bin (__owl_resolve_agent "$_flag_agent")
         or return 1
 
         # Update state file with merged params
@@ -1059,7 +1068,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
             "subcommand=scan (resumed)" \
             "type=$type" \
             "depth=$depth" \
-            "claude=$claude_bin" \
+            "agent=$agent_bin" \
             "ignore=$respect_ignore" \
             "include=$includes" \
             "exclude=$excludes" \
@@ -1069,7 +1078,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
             "retry-delay=$retry_delay" \
             "state-file=$state_file"
 
-        __owl_run_claude $claude_bin $use_memory "scan $type" \
+        __owl_run_agent $agent_bin $use_memory "scan $type" \
             "$prompt" \
             $state_file $retry_delay \
             --append-system-prompt "$scan_system_prompt" --permission-mode $permission_mode --effort $effort -- $files
@@ -1097,7 +1106,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
     set -l use_memory false
     set -ql _flag_memory; and set use_memory true
 
-    set -l claude_bin (__owl_resolve_claude "$_flag_claude")
+    set -l agent_bin (__owl_resolve_agent "$_flag_agent")
     or return 1
 
     set -l includes
@@ -1110,7 +1119,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         "subcommand=scan" \
         "type=$type" \
         "depth=$depth" \
-        "claude=$claude_bin" \
+        "agent=$agent_bin" \
         "ignore=$respect_ignore" \
         "include=$includes" \
         "exclude=$excludes" \
@@ -1141,7 +1150,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         "retry-delay: $retry_delay" \
         -- $files
 
-    __owl_run_claude $claude_bin $use_memory "scan $type" \
+    __owl_run_agent $agent_bin $use_memory "scan $type" \
             "$prompt" \
             $state_file $retry_delay \
             --append-system-prompt "$scan_system_prompt" --permission-mode $permission_mode --effort $effort -- $files
@@ -1152,7 +1161,7 @@ function __owl_check
     set -l slug $argv[2]
     set -e argv[1..2]
 
-    argparse -n 'owl check' 'h/help' 'd/depth=!_validate_int' 'c/claude=' 'effort=!__owl_validate_effort' 'permission-mode=!__owl_validate_permission_mode' 'no-memory' 'memory' 'state-file=!__owl_validate_state_file' 'resume' 'retry-delay=!_validate_int' -- $argv
+    argparse -n 'owl check' 'h/help' 'd/depth=!_validate_int' 'a/agent=' 'effort=!__owl_validate_effort' 'permission-mode=!__owl_validate_permission_mode' 'no-memory' 'memory' 'state-file=!__owl_validate_state_file' 'resume' 'retry-delay=!_validate_int' -- $argv
     or return 1
 
     if set -ql _flag_help
@@ -1160,11 +1169,11 @@ function __owl_check
         echo "" >&2
         echo "Options:" >&2
         echo "  -d, --depth N          Max directory depth (default: 10)" >&2
-        echo "  -c, --claude PATH      Path to claude binary" >&2
+        echo "  -a, --agent NAME|PATH  Agent binary name or path (default: claude)" >&2
         echo "      --effort VALUE     Claude effort level (default: max)" >&2
         echo "      --permission-mode  Permission mode: acceptEdits, plan, default, auto, dontAsk (default: acceptEdits)" >&2
         echo "      --no-memory        Disable auto-memory and skills" >&2
-        echo "      --memory           Allow claude to use memory and skills (default)" >&2
+        echo "      --memory           Allow the agent to use memory and skills (default)" >&2
         echo "      --state-file PATH  Progress file path (default: .owl-chk-\$slug.md)" >&2
         echo "      --resume           Resume from progress file" >&2
         echo "      --retry-delay N    Extra seconds after rate limit reset (default: 1)" >&2
@@ -1297,7 +1306,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
             set retry_delay $stored_retry_delay
         end
 
-        # Read files from state — check before resolving claude
+        # Read files from state — check before resolving the agent
         set -l files
         set -l all_done yes
         for entry in (__owl_state_read_files $state_file)
@@ -1313,7 +1322,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
             return 0
         end
 
-        set -l claude_bin (__owl_resolve_claude "$_flag_claude")
+        set -l agent_bin (__owl_resolve_agent "$_flag_agent")
         or return 1
 
         __owl_state_update_params $state_file \
@@ -1329,14 +1338,14 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
             "subcommand=check (resumed)" \
             "type=$type" \
             "depth=$depth" \
-            "claude=$claude_bin" \
+            "agent=$agent_bin" \
             "effort=$effort" \
             "permission-mode=$permission_mode" \
             "memory=$use_memory" \
             "retry-delay=$retry_delay" \
             "state-file=$state_file"
 
-        __owl_run_claude $claude_bin $use_memory "check $type" \
+        __owl_run_agent $agent_bin $use_memory "check $type" \
             "$prompt" \
             $state_file $retry_delay \
             --append-system-prompt "$check_system_prompt" --permission-mode $permission_mode --effort $effort -- $files
@@ -1356,14 +1365,14 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
     set -l use_memory true
     set -ql _flag_no_memory; and set use_memory false
 
-    set -l claude_bin (__owl_resolve_claude "$_flag_claude")
+    set -l agent_bin (__owl_resolve_agent "$_flag_agent")
     or return 1
 
     __owl_print_params \
         "subcommand=check" \
         "type=$type" \
         "depth=$depth" \
-        "claude=$claude_bin" \
+        "agent=$agent_bin" \
         "effort=$effort" \
         "permission-mode=$permission_mode" \
         "memory=$use_memory" \
@@ -1387,7 +1396,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
         "retry-delay: $retry_delay" \
         -- $files
 
-    __owl_run_claude $claude_bin $use_memory "check $type" \
+    __owl_run_agent $agent_bin $use_memory "check $type" \
             "$prompt" \
             $state_file $retry_delay \
             --append-system-prompt "$check_system_prompt" --permission-mode $permission_mode --effort $effort -- $files

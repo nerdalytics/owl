@@ -5,7 +5,7 @@ Owl audits local files for a named issue type, then verifies every finding by re
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Powered by Claude Code](https://img.shields.io/badge/Powered%20by-Claude%20Code-D97757.svg)](https://github.com/anthropics/claude-code)
 
-Owl is a single fish-shell function that wraps the `claude` CLI. It has two subcommands: `scan` and `check`.
+Owl is a single fish-shell function that wraps a Claude-compatible agent CLI — `claude` by default, or any binary you pass with `--agent`. It has two subcommands: `scan` and `check`.
 
 ## How it works
 
@@ -17,7 +17,7 @@ Runs are resumable. Owl writes progress to a markdown file as it runs, so an int
 
 ## Install
 
-Requires the `claude` CLI on `$PATH` and fish.
+Requires a Claude-compatible agent CLI on `$PATH` (`claude` by default) and fish.
 
 ```fish
 curl -o ~/.config/fish/functions/owl.fish https://raw.githubusercontent.com/nerdalytics/owl/trunk/owl.fish
@@ -44,6 +44,7 @@ owl list vulnerability
 | Flag | What it does |
 |---|---|
 | `-d, --depth N` | Max directory depth (default: 10) |
+| `-a, --agent NAME\|PATH` | Agent binary name (resolved on `$PATH`) or path (default: `claude`) |
 | `--include EXT` | Include files by extension (repeatable, `scan` only) |
 | `--exclude SUFFIX` | Exclude files by suffix (repeatable, `scan` only) |
 | `-i, --ignore BOOL` | Respect `.gitignore` and `.ignore` files (default: true) |
