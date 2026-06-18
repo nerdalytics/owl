@@ -950,8 +950,8 @@ For each finding, report:
 No severity ratings. No classification. If nothing turns up, write 'No findings' and list every function you examined and what you tested for in each.
 
 Writing the report — follow these steps in order:
-1. Try writing to {}.$slug.md
-2. If step 1 fails, run this exact Bash command: \`FALLBACK_DIR=\$TMPDIR/owl-files/$slug && mkdir -p \"\$FALLBACK_DIR\"\` — then write to \`\$FALLBACK_DIR/\$(basename '{raw}').$slug.md\`
+1. Try writing to {}.$agent_name.$slug.md
+2. If step 1 fails, run this exact Bash command: \`FALLBACK_DIR=\$TMPDIR/owl-files/$slug && mkdir -p \"\$FALLBACK_DIR\"\` — then write to \`\$FALLBACK_DIR/\$(basename '{raw}').$agent_name.$slug.md\`
 3. If step 2 also fails, print \`OWL_ERROR: <reason>\` and stop. Do not rename, substitute, or alter any path component. Do not retry with a modified path.
 
 After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If you find no issues, still write the report stating 'No findings.' Do not skip writing."
