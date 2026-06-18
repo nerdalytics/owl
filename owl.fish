@@ -154,6 +154,17 @@ function __owl_resolve_agent --argument-names agent_override
     return 1
 end
 
+# Filename-safe agent label for state-file names: basename of the flag value
+# (so /usr/local/bin/mimo → mimo), dots neutralized so they can't clash with
+# the '.' that separates agent from slug; empty → the default 'claude'.
+function __owl_agent_name --argument-names agent_flag
+    if test -z "$agent_flag"
+        echo claude
+        return 0
+    end
+    string replace -r '^.*/' '' -- $agent_flag | string replace -a '.' '-'
+end
+
 function __owl_slugify --argument-names input
     string lower -- $input | string replace -a ' ' '-' | string replace -ra '[^a-z0-9-]' ''
 end
@@ -886,7 +897,7 @@ function __owl_scan
         echo "      --permission-mode  Permission mode: acceptEdits, plan, default, auto, dontAsk (default: acceptEdits)" >&2
         echo "      --no-memory        Disable auto-memory and skills (default)" >&2
         echo "      --memory           Allow the agent to use memory and skills" >&2
-        echo "      --state-file PATH  Progress file path (default: .owl-scn-\$slug.md)" >&2
+        echo "      --state-file PATH  Progress file path (default: .owl-scn-\$agent.\$slug.md)" >&2
         echo "      --resume           Resume from progress file" >&2
         echo "      --retry-delay N    Extra seconds after rate limit reset (default: 1)" >&2
         echo "      --timeout N        Max seconds per file before killing a stalled agent (0=off, default: 1200)" >&2
@@ -912,7 +923,8 @@ function __owl_scan
 
     __owl_check_tools scan
 
-    set -l state_file .owl-scn-$slug.md
+    set -l agent_name (__owl_agent_name "$_flag_agent")
+    set -l state_file .owl-scn-$agent_name.$slug.md
     set -ql _flag_state_file; and set state_file $_flag_state_file
 
     set -l retry_delay 1
@@ -1217,7 +1229,7 @@ function __owl_check
         echo "      --permission-mode  Permission mode: acceptEdits, plan, default, auto, dontAsk (default: acceptEdits)" >&2
         echo "      --no-memory        Disable auto-memory and skills" >&2
         echo "      --memory           Allow the agent to use memory and skills (default)" >&2
-        echo "      --state-file PATH  Progress file path (default: .owl-chk-\$slug.md)" >&2
+        echo "      --state-file PATH  Progress file path (default: .owl-chk-\$agent.\$slug.md)" >&2
         echo "      --resume           Resume from progress file" >&2
         echo "      --retry-delay N    Extra seconds after rate limit reset (default: 1)" >&2
         echo "      --timeout N        Max seconds per file before killing a stalled agent (0=off, default: 1200)" >&2
@@ -1239,7 +1251,8 @@ function __owl_check
 
     __owl_check_tools check
 
-    set -l state_file .owl-chk-$slug.md
+    set -l agent_name (__owl_agent_name "$_flag_agent")
+    set -l state_file .owl-chk-$agent_name.$slug.md
     set -ql _flag_state_file; and set state_file $_flag_state_file
 
     set -l retry_delay 1
@@ -1497,7 +1510,7 @@ function __owl_list --argument-names type slug
         # Filtered: specific type
         set -a files (__owl_discover_files check $depth true $slug "")
         set -a files (__owl_discover_files check $depth true "$slug.chk" "")
-        for sf in ".owl-scn-$slug.md" ".owl-chk-$slug.md"
+        for sf in .owl-scn-*.$slug.md .owl-chk-*.$slug.md
             test -f $sf; and set -a files $sf
         end
     else
@@ -1508,7 +1521,7 @@ function __owl_list --argument-names type slug
         set -a files (__owl_discover_files check $depth true "chk" "")
         for sf in .owl-scn-*.md
             if test -f $sf
-                set -l sf_slug (string replace -r '^\.owl-scn-(.+)\.md$' '$1' -- $sf)
+                set -l sf_slug (string replace -r '^\.owl-scn-[^.]+\.(.+)\.md$' '$1' -- $sf)
                 set -a files (__owl_discover_files check $depth true $sf_slug "")
             end
         end

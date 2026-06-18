@@ -51,7 +51,7 @@ owl list vulnerability
 | `--effort VALUE` | `low`, `medium`, `high`, `xhigh`, `max` (default: `xhigh`) |
 | `--permission-mode` | `acceptEdits`, `plan`, `default`, `auto`, `dontAsk` |
 | `--no-memory` / `--memory` | Toggle Claude auto-memory and skills (`scan` defaults off, `check` defaults on) |
-| `--state-file PATH` | Progress file (default: `.owl-scn-<slug>.md` or `.owl-chk-<slug>.md`) |
+| `--state-file PATH` | Progress file (default: `.owl-scn-<agent>.<slug>.md` or `.owl-chk-<agent>.<slug>.md`) |
 | `--resume` | Resume from progress file |
 | `--retry-delay N` | Extra seconds after rate-limit reset (default: 1) |
 | `--timeout N` | Max seconds per file before a stalled agent is killed (`0` = off, default: 1200) |
