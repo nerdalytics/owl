@@ -1,11 +1,11 @@
 # Owl
 
-Owl audits local files for a named issue type, then verifies every finding by reproducing it with a test.
+Owl audits local files for a named issue type, then tries to confirm each finding by reproducing it with a test.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Powered by Claude Code](https://img.shields.io/badge/Powered%20by-Claude%20Code-D97757.svg)](https://github.com/anthropics/claude-code)
 
-Owl is a single fish-shell function that wraps a Claude-compatible agent CLI — `claude` by default, or any binary you pass with `--agent`. It has two subcommands: `scan` and `check`.
+Owl is a single-file fish script that wraps a Claude-compatible agent CLI — `claude` by default, or any binary you pass with `--agent`. It has three subcommands: `scan`, `check`, and `list`.
 
 ## How it works
 
@@ -13,7 +13,7 @@ Owl is a single fish-shell function that wraps a Claude-compatible agent CLI —
 
 `check` reads that report and asks `claude` to reproduce each finding with a test. Only a passing test marks the finding `CONFIRMED`. Three attempts, then `NOT CONFIRMED` and move on. No severity scores.
 
-Runs are resumable. Owl writes progress to a markdown file as it runs, so an interrupted scan picks up where it left off. If Claude hits a rate limit, Owl parses the reset time and waits.
+Runs are resumable. Owl writes progress to a markdown file as it runs, so an interrupted scan picks up where it left off. If Claude hits a rate limit, Owl parses the reset time and waits. A per-file `--timeout` (default 20 min) kills a stalled agent so one hung file can't block the run — that file is left unmarked and retried on `--resume`.
 
 ## Install
 
@@ -48,12 +48,13 @@ owl list vulnerability
 | `--include EXT` | Include files by extension (repeatable, `scan` only) |
 | `--exclude SUFFIX` | Exclude files by suffix (repeatable, `scan` only) |
 | `-i, --ignore BOOL` | Respect `.gitignore` and `.ignore` files (default: true) |
-| `--effort VALUE` | Claude effort level (default: max) |
+| `--effort VALUE` | `low`, `medium`, `high`, `xhigh`, `max` (default: `xhigh`) |
 | `--permission-mode` | `acceptEdits`, `plan`, `default`, `auto`, `dontAsk` |
 | `--no-memory` / `--memory` | Toggle Claude auto-memory and skills (`scan` defaults off, `check` defaults on) |
 | `--state-file PATH` | Progress file (default: `.owl-scn-<slug>.md` or `.owl-chk-<slug>.md`) |
 | `--resume` | Resume from progress file |
 | `--retry-delay N` | Extra seconds after rate-limit reset (default: 1) |
+| `--timeout N` | Max seconds per file before a stalled agent is killed (`0` = off, default: 1200) |
 
 ## Prompt injection
 
