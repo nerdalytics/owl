@@ -80,9 +80,15 @@ On `resume`, owl replays the stored params and forwarded args; CLI params overri
 
 ## Known limitations
 
-1. **Rate-limit handling assumes Claude Code's output.** owl detects rate-limit pauses by
-   matching `resets <time> (<tz>)` in the agent's output and aborts on `Not logged in`. Other
-   agents' rate-limit and auth messages won't be recognized.
+1. **Rate-limit and auth handling assume Claude Code's output, and are hardcoded (not
+   configurable).** Between files owl scans the agent's output for Claude-specific strings:
+   - it pauses on a rate-limit notice matching `resets <time> (<tz>)`, parses that time and
+     sleeps until the reset (plus `retry-delay` seconds), falling back to a 30-minute backoff
+     if it can't parse the time;
+   - it aborts the whole run on `Not logged in`.
+
+   Other agents' rate-limit and authentication messages won't be recognized, so owl will not
+   pause or abort for them.
 2. **Isolation is Claude-shaped.** With `memory=false` (the `scan` default) owl runs the agent
    under `env -i`, setting `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and preserving only `$HOME`,
    `$PATH`, `$TMPDIR`, `$USER`, and `$SECURITYSESSIONID`. Agents that authenticate via other
