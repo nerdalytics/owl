@@ -875,11 +875,57 @@ function __owl_run_agent
     echo "All $total files processed" >&2
 end
 
+# Load a profile file and echo key=value lines for the given command (scan|check).
+# Shared keys (agent, p, s) are always included; per-command keys (scan.*, check.*)
+# are included only for the matching command. forward= may repeat.
+function __owl_load_profile --argument-names name cmd
+    set -l profile_file
+
+    # A path (contains /) is used as-is; a bare name searches known directories.
+    if string match -q '*/*' -- $name
+        set profile_file $name
+    else
+        for dir in ~/.config/owl/profiles (dirname (status current-filename 2>/dev/null) 2>/dev/null)/profiles
+            if test -f "$dir/$name"
+                set profile_file "$dir/$name"
+                break
+            end
+        end
+    end
+
+    if test -z "$profile_file"; or not test -f "$profile_file"
+        echo "owl: profile not found: $name" >&2
+        return 1
+    end
+
+    while read -l line
+        # Skip comments and blank lines
+        string match -qr '^\s*#' -- $line; and continue
+        string match -qr '^\s*$' -- $line; and continue
+
+        set -l kv (string split -m1 '=' -- $line)
+        test (count $kv) -lt 2; and continue
+        set -l key $kv[1]
+        set -l val $kv[2]
+
+        # Per-command keys: include only the matching command's
+        if string match -q "$cmd.*" -- $key
+            set key (string sub -s (math (string length "$cmd.") + 1) -- $key)
+        else if string match -q '*.*' -- $key
+            continue
+        end
+
+        printf '%s=%s\n' $key $val
+    end < $profile_file
+end
+
 function __owl_scan_help
     echo "Usage: owl scan <type> [key=value ...] [agent-flags ...] [file|dir ...]" >&2
     echo "" >&2
     echo "owl params (key=value):" >&2
     echo "  agent=NAME|PATH    Agent binary name or path (default: claude)" >&2
+    echo "  profile=NAME       Load agent defaults from a profile (e.g. profile=claude)" >&2
+    echo "                     CLI params override profile values" >&2
     echo "  depth=N            Max directory depth (default: 10)" >&2
     echo "  ignore=BOOL        Respect ignore files (default: true)" >&2
     echo "  include=EXT,EXT    Include files by extension (comma-separated)" >&2
@@ -908,6 +954,8 @@ function __owl_scan_help
     echo "Note: target paths must be inside the current working directory." >&2
     echo "" >&2
     echo "Examples:" >&2
+    echo "  owl scan vulnerability profile=claude           Use the Claude profile" >&2
+    echo "  owl scan vulnerability profile=qwen             Use the Qwen profile" >&2
     echo "  owl scan vulnerability p=-p s=--append-system-prompt --permission-mode=acceptEdits" >&2
     echo "  owl scan \"DRY violations\" agent=claude p=-p s=--append-system-prompt" >&2
     echo "  owl scan vulnerability agent=codex p=exec --full-auto src/" >&2
@@ -952,6 +1000,26 @@ function __owl_scan
     set -l type $rest[1]
     set -l slug (__owl_slugify $type)
     set -l targets $rest[2..]
+
+    # Load profile defaults: prepend so CLI params (last match) override
+    if set -l p_profile (__owl_param_value profile $params)
+        set -l prof_lines (__owl_load_profile $p_profile scan)
+        or return 1
+        set -l prof_params
+        set -l prof_forward
+        for pp in $prof_lines
+            set -l pkv (string split -m1 '=' -- $pp)
+            if test "$pkv[1]" = forward
+                set -a prof_forward $pkv[2]
+            else
+                set -a prof_params $pp
+            end
+        end
+        set params $prof_params $params
+        if test (count $forward_args) -eq 0 -a (count $prof_forward) -gt 0
+            set forward_args $prof_forward
+        end
+    end
 
     # Validate owl params
     set -l p_depth; set -l p_agent; set -l p_ignore; set -l p_include
@@ -1321,6 +1389,8 @@ function __owl_check_help
     echo "" >&2
     echo "owl params (key=value):" >&2
     echo "  agent=NAME|PATH    Agent binary name or path (default: claude)" >&2
+    echo "  profile=NAME       Load agent defaults from a profile (e.g. profile=claude)" >&2
+    echo "                     CLI params override profile values" >&2
     echo "  depth=N            Max directory depth (default: 10)" >&2
     echo "  memory=BOOL        Allow agent memory and skills (default: true)" >&2
     echo "  state-file=PATH    Progress file path (default: .owl-chk-\$agent.\$slug.md)" >&2
@@ -1343,6 +1413,8 @@ function __owl_check_help
     echo "Note: target paths must be inside the current working directory." >&2
     echo "" >&2
     echo "Examples:" >&2
+    echo "  owl check vulnerability profile=claude               Use the Claude profile" >&2
+    echo "  owl check vulnerability profile=qwen                 Use the Qwen profile" >&2
     echo "  owl check vulnerability p=-p s=--append-system-prompt    Verify all reports" >&2
     echo "  owl check xss p=-p report.xss.md                         Verify a specific report" >&2
     echo "  owl check sqli p=-p depth=5                              Reports up to 5 levels deep" >&2
@@ -1385,6 +1457,26 @@ function __owl_check
     set -l type $rest[1]
     set -l slug (__owl_slugify $type)
     set -l targets $rest[2..]
+
+    # Load profile defaults: prepend so CLI params (last match) override
+    if set -l p_profile (__owl_param_value profile $params)
+        set -l prof_lines (__owl_load_profile $p_profile check)
+        or return 1
+        set -l prof_params
+        set -l prof_forward
+        for pp in $prof_lines
+            set -l pkv (string split -m1 '=' -- $pp)
+            if test "$pkv[1]" = forward
+                set -a prof_forward $pkv[2]
+            else
+                set -a prof_params $pp
+            end
+        end
+        set params $prof_params $params
+        if test (count $forward_args) -eq 0 -a (count $prof_forward) -gt 0
+            set forward_args $prof_forward
+        end
+    end
 
     # Validate owl params (check has no include/exclude)
     set -l p_depth; set -l p_agent; set -l p_state_file

@@ -1,0 +1,22 @@
+# Owl profile: Qwen Code
+# https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/#command-line-arguments-table
+#
+# Permissions use granular allowlists — never -y / YOLO mode.
+# Scan: --safe-mode strips memory + extensions for clean-room analysis.
+# Check: full capabilities (memory=true), shell for running tests.
+#
+# Rate-limit retry: set QWEN_CODE_UNATTENDED_RETRY=1 in your environment
+# for native 429/529 retry with exponential backoff.
+
+agent=qwen
+p=-p
+s=--append-system-prompt
+
+scan.memory=false
+scan.forward=--safe-mode
+scan.forward=--allowed-tools
+scan.forward=read_file,edit,write_file,glob,grep_search,list_directory
+
+check.memory=true
+check.forward=--allowed-tools
+check.forward=run_shell_command,read_file,edit,write_file,glob,grep_search,list_directory

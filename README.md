@@ -5,7 +5,7 @@ Owl audits local files for a named issue type, then tries to confirm each findin
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Powered by Claude Code](https://img.shields.io/badge/Powered%20by-Claude%20Code-D97757.svg)](https://github.com/anthropics/claude-code)
 
-Owl is a single-file fish script that drives an agent CLI — `claude` by default, or any binary you pass with `agent=`. It is agent-agnostic: owl owns prompt building, file iteration, progress/resume, rate-limit retry and the per-file timeout, while you supply the agent's own flags (forwarded verbatim) and wire the prompt with `p=`/`s=`. It has three subcommands: `scan`, `check`, and `list`.
+Owl is a single-file fish script that drives an agent CLI — `claude` by default, or any binary you pass with `agent=`. It is agent-agnostic: owl owns prompt building, file iteration, progress/resume, rate-limit retry and the per-file timeout, while you supply the agent's own flags (forwarded verbatim) and wire the prompt with `p=`/`s=`. Bundled profiles for Claude Code and Qwen Code wire these flags for you. It has three subcommands: `scan`, `check`, and `list`.
 
 ## How it works
 
@@ -38,19 +38,60 @@ You wire the prompt and system prompt to your agent with `p=` and `s=`:
   Omit `s=` and the system prompt is not sent.
 
 ```fish
-owl scan vulnerability p=-p s=--append-system-prompt --permission-mode=acceptEdits
-owl scan "memory leak" p=-p include=.py,.js
-owl scan sqli p=-p src/ exclude=.test.py
-owl scan vulnerability p=-p src/auth.py
-owl scan vulnerability agent=codex p=exec --full-auto src/
+owl scan vulnerability profile=claude
+owl scan "memory leak" profile=qwen include=.py,.js
+owl scan sqli profile=claude src/ exclude=.test.py
+owl scan vulnerability profile=qwen src/auth.py
 owl scan vulnerability p=-p resume
 
-owl check vulnerability p=-p s=--append-system-prompt
-owl check xss p=-p resume
+owl check vulnerability profile=claude
+owl check xss profile=qwen resume
 
 owl list
 owl list vulnerability
 owl scan help
+```
+
+Without a profile, wire the agent manually:
+
+```fish
+owl scan vulnerability p=-p s=--append-system-prompt --permission-mode=acceptEdits
+owl scan vulnerability agent=codex p=exec --full-auto src/
+```
+
+## Profiles
+
+A profile is a file of `key=value` defaults for a specific agent. It sets the agent
+binary, prompt/system-prompt flags, per-command tool permissions, and memory defaults.
+CLI params always override profile values.
+
+Bundled profiles in `profiles/`:
+
+| Profile | Agent | Scan permissions | Check permissions |
+|---------|-------|-----------------|-------------------|
+| `claude` | Claude Code | Read, Edit, Write, Glob, Grep | + Bash |
+| `qwen` | Qwen Code | Read, Edit, Write, Glob, Grep, ListFiles (+ `--safe-mode`) | + Shell |
+
+Profiles use granular tool allowlists — never blanket permission bypass.
+
+Profile search path: `~/.config/owl/profiles/`, then `profiles/` relative to owl.fish.
+A path with `/` is used as-is (e.g. `profile=profiles/claude`).
+
+Profile file format — `key=value` lines, `#` comments, `forward=` may repeat:
+
+```
+agent=qwen
+p=-p
+s=--append-system-prompt
+
+scan.memory=false
+scan.forward=--safe-mode
+scan.forward=--allowed-tools
+scan.forward=read_file,edit,write_file,glob,grep_search,list_directory
+
+check.memory=true
+check.forward=--allowed-tools
+check.forward=run_shell_command,read_file,edit,write_file,glob,grep_search,list_directory
 ```
 
 ## Params
@@ -60,6 +101,7 @@ owl's own params use `key=value`. Anything starting with `-`/`--` is forwarded t
 | Param | What it does |
 |---|---|
 | `agent=NAME\|PATH` | Agent binary name (resolved on `$PATH`) or path (default: `claude`) |
+| `profile=NAME` | Load agent defaults from a profile. CLI params override profile values |
 | `depth=N` | Max directory depth (default: 10) |
 | `include=EXT,EXT` | Include files by extension, comma-separated (`scan` only) |
 | `exclude=SFX,SFX` | Exclude files by suffix, comma-separated (`scan` only) |
