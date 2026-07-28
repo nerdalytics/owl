@@ -1,0 +1,16 @@
+# Owl profile: Claude Code
+# https://code.claude.com/docs/en/cli-usage
+#
+# Permissions use granular allowlists — never --dangerously-skip-permissions.
+# Scan: read source files, write reports. No arbitrary shell.
+# Check: read reports + source, write tests, run tests via shell.
+
+agent=claude
+p=-p
+s=--append-system-prompt
+
+scan.memory=false
+scan.forward=--allowedTools=Read,Edit,Write,Glob,Grep
+
+check.memory=true
+check.forward=--allowedTools=Read,Edit,Write,Glob,Grep,Bash
