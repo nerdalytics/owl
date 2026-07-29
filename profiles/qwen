@@ -11,6 +11,7 @@
 agent=qwen
 p=-p
 s=--append-system-prompt
+#model=qwen3.8-max-preview
 
 scan.memory=false
 scan.forward=--safe-mode

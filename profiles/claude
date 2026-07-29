@@ -8,6 +8,7 @@
 agent=claude
 p=-p
 s=--append-system-prompt
+#model=claude-sonnet-5
 
 scan.memory=false
 scan.forward=--allowedTools=Read,Edit,Write,Glob,Grep
