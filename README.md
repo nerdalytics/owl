@@ -40,12 +40,12 @@ You wire the prompt and system prompt to your agent with `p=` and `s=`:
 ```fish
 owl scan vulnerability profile=claude
 owl scan "memory leak" profile=qwen include=.py,.js
-owl scan sqli profile=claude src/ exclude=.test.py
+owl scan sqli profile=codex src/
 owl scan vulnerability profile=qwen src/auth.py
 owl scan vulnerability p=-p resume
 
 owl check vulnerability profile=claude
-owl check xss profile=qwen resume
+owl check xss profile=codex resume
 
 owl list
 owl list vulnerability
@@ -62,37 +62,26 @@ owl scan vulnerability agent=codex p=exec --full-auto src/
 ## Profiles
 
 A profile is a file of `key=value` defaults for a specific agent. It sets the agent
-binary, prompt/system-prompt flags, per-command tool permissions, and memory defaults.
-CLI params always override profile values.
-
-Bundled profiles in `profiles/`:
-
-| Profile | Agent | Scan permissions | Check permissions |
-|---------|-------|-----------------|-------------------|
-| `claude` | Claude Code | Read, Edit, Write, Glob, Grep | + Bash |
-| `qwen` | Qwen Code | Read, Edit, Write, Glob, Grep, ListFiles (+ `--safe-mode`) | + Shell |
-
-Profiles use granular tool allowlists — never blanket permission bypass.
+binary, prompt/system-prompt flags, model, per-command tool permissions, and memory
+defaults. CLI params always override profile values. Bundled profiles live in
+[`profiles/`](profiles/) — each file is self-documenting.
 
 Profile search path: `~/.config/owl/profiles/`, then `profiles/` relative to owl.fish.
 A path with `/` is used as-is (e.g. `profile=profiles/claude`).
 
-Profile file format — `key=value` lines, `#` comments, `forward=` may repeat:
+Profile keys:
 
-```
-agent=qwen
-p=-p
-s=--append-system-prompt
+| Key | What it does |
+|-----|-------------|
+| `agent=` | Agent binary name or path |
+| `p=` | Prompt-delivery flag (e.g. `-p`, `exec`) |
+| `s=` | System-prompt-delivery flag. If the value contains a space, the part after the space is prepended to the system prompt as a single argument (e.g. `s=-c developer_instructions=`) |
+| `model=` | Adds `--model <name>` to the agent invocation |
+| `forward=` | Forwarded agent flag (may repeat, one token per line) |
+| `memory=` | Allow agent memory (`true`/`false`) |
 
-scan.memory=false
-scan.forward=--safe-mode
-scan.forward=--allowed-tools
-scan.forward=read_file,edit,write_file,glob,grep_search,list_directory
-
-check.memory=true
-check.forward=--allowed-tools
-check.forward=run_shell_command,read_file,edit,write_file,glob,grep_search,list_directory
-```
+Keys without a prefix apply to both commands. Prefix with `scan.` or `check.` for
+per-command values (e.g. `scan.memory=false`, `check.forward=--sandbox`).
 
 ## Params
 
