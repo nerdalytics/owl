@@ -269,6 +269,16 @@ function __owl_validate_uint --argument-names val
     string match -rq '^[0-9]+$' -- $val
 end
 
+# Collect error.* keys from params → "ACTION=PATTERN" lines (strips "error." prefix).
+function __owl_collect_error_signals
+    for param in $argv
+        set -l pkv (string split -m1 '=' -- $param)
+        if string match -q 'error.*' -- $pkv[1]
+            echo (string sub -s 7 -- $pkv[1])"=$pkv[2]"
+        end
+    end
+end
+
 function __owl_validate_bool --argument-names val
     switch $val
         case true false
@@ -827,34 +837,68 @@ function __owl_run_agent
                 break
             end
 
-            # Check for fatal auth failure
-            if string match -q "*Not logged in*" -- $output
-                set -g $_int yes
+            # Check error signals (profile/CLI-configured stop/pause patterns).
+            # Each signal is ACTION=PATTERN where ACTION is stop, pause.N, or
+            # pause.smart.  PATTERN is a glob unless prefixed with "regex:".
+            # First match wins.  No match → success.
+            set -l _signals $__owl_error_signals_$fish_pid
+            if test (count $_signals) -eq 0
+                # Backward compat: no profile/CLI signals → legacy Claude patterns
+                set _signals \
+                    'stop=*Not logged in*' \
+                    'pause.smart=regex:resets \d{1,2}(?::\d{2})?(?:am|pm) \('
+            end
+
+            set -l signal_action none
+            set -l signal_wait 0
+            set -l signal_pattern
+            for signal in $_signals
+                set -l skv (string split -m1 '=' -- $signal)
+                test (count $skv) -lt 2; and continue
+                set -l action $skv[1]
+                set -l pattern $skv[2]
+
+                set -l matched no
+                if string match -q 'regex:*' -- $pattern
+                    string match -rq -- (string sub -s 7 -- $pattern) $output; and set matched yes
+                else
+                    string match -q -- $pattern $output; and set matched yes
+                end
+                test "$matched" = yes; or continue
+
+                set signal_pattern $pattern
+                if test "$action" = stop
+                    set signal_action stop
+                else if test "$action" = pause.smart
+                    set signal_action pause
+                    set signal_wait (__owl_parse_rate_limit "$output" $retry_delay)
+                else if string match -q 'pause.*' -- $action
+                    set signal_action pause
+                    set signal_wait (string sub -s 7 -- $action)
+                    string match -rq '^[0-9]+$' -- $signal_wait; or set signal_wait 60
+                end
                 break
             end
 
-            if string match -rq 'resets \d{1,2}(?::\d{2})?(?:am|pm) \(' -- $output
-                set -l wait_secs (__owl_parse_rate_limit "$output" $retry_delay)
-                set -l parsed $status
-                set -l reset_display (__owl_format_reset_time "$output")
-
-                if test $parsed -eq 0
-                    echo "Rate limited — paused until $reset_display" >&2
+            if test "$signal_action" = stop
+                echo "owl: fatal error matched ($signal_pattern) — aborting run" >&2
+                set -g $_int yes
+                break
+            else if test "$signal_action" = pause
+                if test "$signal_wait" -gt 120
+                    set -l display (math "floor($signal_wait / 60)")"m"
                 else
-                    set -l fallback_min (math "floor($wait_secs / 60)")
-                    echo "Rate limited — could not parse reset time, waiting "$fallback_min"m" >&2
+                    set -l display "$signal_wait""s"
                 end
+                echo "owl: error matched ($signal_pattern) — pausing $display" >&2
+                printf '\033]0;owl %s [%d/%d]: paused %s\007' $label $completed $total "$display" >&2
 
-                printf '\033]0;owl %s [%d/%d]: paused until %s\007' $label $completed $total "$reset_display" >&2
+                sleep $signal_wait
 
-                sleep $wait_secs
-
-                # Check if interrupted during sleep
                 if test "$$_int" = yes
                     break
                 end
 
-                # Retry this file
                 printf '\033]0;owl %s [%d/%d] %s\007' $label $completed $total $file >&2
                 echo "Resuming — retrying [$completed/$total] $file" >&2
                 continue
@@ -869,7 +913,7 @@ function __owl_run_agent
     # Clean up handler and globals
     functions -e __owl_sigint_handler_$fish_pid
     set -l was_interrupted $$_int
-    set -e $_apid $_int
+    set -e $_apid $_int __owl_error_signals_$fish_pid
 
     # Check final state
     if test "$was_interrupted" = yes
@@ -916,10 +960,12 @@ function __owl_load_profile --argument-names name cmd
         set -l key $kv[1]
         set -l val $kv[2]
 
-        # Per-command keys: include only the matching command's
+        # Per-command keys: include only the matching command's.
+        # Dotted keys that are NOT a known command prefix (scan/check) are
+        # shared keys (e.g. error.stop) and pass through unchanged.
         if string match -q "$cmd.*" -- $key
             set key (string sub -s (math (string length "$cmd.") + 1) -- $key)
-        else if string match -q '*.*' -- $key
+        else if string match -q 'scan.*' -- $key; or string match -q 'check.*' -- $key
             continue
         end
 
@@ -946,6 +992,10 @@ function __owl_scan_help
     echo "                     Omit p= and owl does not inject the prompt (wire it via forwarded args)." >&2
     echo "  s=FLAG             System-prompt-delivery flag — owl appends '<FLAG> <system-prompt>'" >&2
     echo "                     (e.g. s=--append-system-prompt). Omit s= and no system prompt is sent." >&2
+    echo "  error.stop=GLOB    Abort the run when agent output matches GLOB (file stays unmarked)" >&2
+    echo "  error.pause.N=GLOB Sleep N seconds then retry the file when output matches GLOB" >&2
+    echo "  error.pause.smart=REGEX  Like pause, but parses a rate-limit reset time from output" >&2
+    echo "                     Prefix GLOB with 'regex:' for regex matching. May repeat." >&2
     echo "" >&2
     echo "Keywords (bare):" >&2
     echo "  resume             Resume from progress file" >&2
@@ -1160,6 +1210,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         set -l stored_prompt_flag
         set -l stored_system_flag
         set -l stored_forward
+        set -l stored_errors
 
         for line in (__owl_state_read_params $state_file)
             set -l kv (string match -r '^([^:]+):\s*(.*)$' -- $line)
@@ -1209,6 +1260,8 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
                     set stored_system_flag $val
                 case forward
                     set stored_forward (string split ' ' -- $val)
+                case error
+                    set -a stored_errors $val
             end
         end
 
@@ -1310,6 +1363,12 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
             "forward=$fwd" \
             "state-file=$state_file"
 
+        set -l error_signals (__owl_collect_error_signals $params)
+        if test (count $error_signals) -eq 0
+            set error_signals $stored_errors
+        end
+        set -g __owl_error_signals_$fish_pid $error_signals
+
         __owl_run_agent $agent_bin $use_memory "scan $type" \
             "$prompt" \
             $state_file $retry_delay $timeout \
@@ -1368,6 +1427,13 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         set files (__owl_discover_files all $depth $respect_ignore "" "" $includes -- $excludes)
     end
 
+    # Collect error signals and build state file lines
+    set -l error_signals (__owl_collect_error_signals $params)
+    set -l error_state_lines
+    for sig in $error_signals
+        set -a error_state_lines "error: $sig"
+    end
+
     # Write initial state file
     __owl_state_write $state_file \
         "subcommand: scan" \
@@ -1382,7 +1448,10 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line. If
         "p: $prompt_flag" \
         "s: $system_flag" \
         "forward: $forward_args" \
+        $error_state_lines \
         -- $files
+
+    set -g __owl_error_signals_$fish_pid $error_signals
 
     __owl_run_agent $agent_bin $use_memory "scan $type" \
             "$prompt" \
@@ -1407,6 +1476,10 @@ function __owl_check_help
     echo "                     Omit p= and owl does not inject the prompt (wire it via forwarded args)." >&2
     echo "  s=FLAG             System-prompt-delivery flag — owl appends '<FLAG> <system-prompt>'" >&2
     echo "                     (e.g. s=--append-system-prompt). Omit s= and no system prompt is sent." >&2
+    echo "  error.stop=GLOB    Abort the run when agent output matches GLOB (file stays unmarked)" >&2
+    echo "  error.pause.N=GLOB Sleep N seconds then retry the file when output matches GLOB" >&2
+    echo "  error.pause.smart=REGEX  Like pause, but parses a rate-limit reset time from output" >&2
+    echo "                     Prefix GLOB with 'regex:' for regex matching. May repeat." >&2
     echo "" >&2
     echo "Keywords (bare):" >&2
     echo "  resume             Resume from progress file" >&2
@@ -1581,6 +1654,7 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
         set -l stored_prompt_flag
         set -l stored_system_flag
         set -l stored_forward
+        set -l stored_errors
 
         for line in (__owl_state_read_params $state_file)
             set -l kv (string match -r '^([^:]+):\s*(.*)$' -- $line)
@@ -1624,6 +1698,8 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
                     set stored_system_flag $val
                 case forward
                     set stored_forward (string split ' ' -- $val)
+                case error
+                    set -a stored_errors $val
             end
         end
 
@@ -1700,6 +1776,12 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
             "forward=$fwd" \
             "state-file=$state_file"
 
+        set -l error_signals (__owl_collect_error_signals $params)
+        if test (count $error_signals) -eq 0
+            set error_signals $stored_errors
+        end
+        set -g __owl_error_signals_$fish_pid $error_signals
+
         __owl_run_agent $agent_bin $use_memory "check $type" \
             "$prompt" \
             $state_file $retry_delay $timeout \
@@ -1744,6 +1826,13 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
         set files (__owl_discover_files check $depth true $slug "")
     end
 
+    # Collect error signals and build state file lines
+    set -l error_signals (__owl_collect_error_signals $params)
+    set -l error_state_lines
+    for sig in $error_signals
+        set -a error_state_lines "error: $sig"
+    end
+
     __owl_state_write $state_file \
         "subcommand: check" \
         "type: $type" \
@@ -1754,7 +1843,10 @@ After a successful write, print \`OWL_WROTE: <actual-path>\` on its own line."
         "p: $prompt_flag" \
         "s: $system_flag" \
         "forward: $forward_args" \
+        $error_state_lines \
         -- $files
+
+    set -g __owl_error_signals_$fish_pid $error_signals
 
     __owl_run_agent $agent_bin $use_memory "check $type" \
             "$prompt" \
