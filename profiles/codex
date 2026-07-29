@@ -12,6 +12,14 @@ p=exec
 s=-c developer_instructions=
 #model=o3
 
+# Error signals: stop = abort run (file stays unmarked for resume),
+# pause.N = sleep N seconds then retry.
+error.stop=*401*
+error.stop=*403*
+error.stop=*insufficient_quota*
+error.pause.60=*429*
+error.pause.120=*503*
+
 scan.memory=false
 scan.forward=--sandbox
 scan.forward=workspace-write

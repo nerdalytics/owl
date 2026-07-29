@@ -13,6 +13,17 @@ p=-p
 s=--append-system-prompt
 #model=qwen3.8-max-preview
 
+# Error signals: stop = abort run (file stays unmarked for resume),
+# pause.N = sleep N seconds then retry.
+# Qwen surfaces API errors as "[API Error: <code> <message>]" in output.
+error.stop=*403*
+error.stop=*401*
+error.stop=*Access to model denied*
+error.stop=*insufficient_quota*
+error.pause.60=*429*
+error.pause.300=*529*
+error.pause.120=*503*
+
 scan.memory=false
 scan.forward=--safe-mode
 scan.forward=--allowed-tools
