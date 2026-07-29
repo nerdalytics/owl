@@ -1,0 +1,21 @@
+# Owl profile: OpenAI Codex CLI
+# https://learn.chatgpt.com/codex/non-interactive-mode
+# https://learn.chatgpt.com/codex/config-file/config-reference
+#
+# Non-interactive mode uses the "exec" subcommand (p=exec).
+# System prompt delivered via -c developer_instructions= (prefix concatenation).
+# Sandbox: workspace-write allows file writes in the project directory.
+# Memories are off by default in Codex.
+
+agent=codex
+p=exec
+s=-c developer_instructions=
+#model=o3
+
+scan.memory=false
+scan.forward=--sandbox
+scan.forward=workspace-write
+
+check.memory=true
+check.forward=--sandbox
+check.forward=workspace-write
